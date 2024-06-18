@@ -1,5 +1,4 @@
 # reading df 
-
     df = spark.read.format('csv') \
                 .option('header', 'true') \ 
                 .option('inferschema', 'true') \ 
@@ -17,11 +16,51 @@
 
 1. split(col('value'), ' '): converts the text column to a list 
 2. explode: converts an array/map col to rows 
+   1. for array creates one col and pivots the array data to rows 
+   2. for map creates two cols (key, value) and adds a row for each key value pair.
 
 
 
 # maptype and arraytype columns 
-*todo*
+## map type
+- defined using MapType(keytype, valuetype)
+- it does allow multiple keys and values 
+
+
+        data1 = [
+        ({'fname': 'sowjanya', 'lname': 'j'}, 26),
+        ({'fname': 'Anusha', 'mname': 'sow', 'lname': 'j', 'age': 12}, 24)
+        ]
+        schema1 = StructType([
+                        StructField('name', MapType(StringType(), StringType())), 
+                        StructField('age', IntegerType())
+        ]) 
+        df1 = spark.createDataFrame(data1, schema1)
+
+
+        # accessing the data
+        df1.select("name.fname", "name.mname", "name.age", "age").show(truncate=False)
+        +--------+-----+----+---+
+        |fname   |mname|age |age|
+        +--------+-----+----+---+
+        |sowjanya|NULL |NULL|26 |
+        |Anusha  |sow  |12  |24 |
+        +--------+-----+----+---+
+
+        # convert col into rows (explode)
+        df1.select(explode("name"), 'age').show(truncate=False)
+        +-----+--------+---+
+        |key  |value   |age|
+        +-----+--------+---+
+        |fname|sowjanya|26 |
+        |lname|j       |26 |
+        |fname|Anusha  |24 |
+        |lname|j       |24 |
+        |mname|sow     |24 |
+        |age  |12      |24 |
+
+        # map_keys and map_values provides an array of keys and values respectively.
+
 
 
 # providing schema 
@@ -60,6 +99,10 @@
   - extracting diff parts of dates like month, year, day etc
   - adding/subtracting from dates
 
+    to_date(dtstr_col, input_format)  <=> datetime.strptime(dt_str, input_format) <=> to_date
+    date_format(dt_col, output_format) <=> datetime.strftime(dt, output_format)   <=> to_char
+
+
 # Transformations and Actions
     1. Actions: 
        1. read
@@ -74,6 +117,50 @@
        4. df.repartition(2) - wide transformation
           * syntax: df.repartition(n, *cols). we can either specify n or the cols or both, but one of them should be specified. This is a transformation, so the df needs to be reassigned to new df
        5. df.limit(10) -> returns df after limiting results
+       6. regexp_extract(str, pattern, group_to_pick): this is similar to re.match in python/regexp_match in postgresql
+    
+## collect_list collect_set
+-  opp of explode, collects the rows into a list including dups, where as collect_set collects the rows and dedup them
+- works with Agg functions and window functions
+- same in spark.sql as well 
+  
+        select collect_list(col) from table
+        group by another_col
+
+- example: 
+
+        from pyspark.sql.functions import collect_list
+
+        data = [('James','Java'),
+        ('James','Python'),
+        ('James','Python'),
+        ('Anna','PHP'),
+        ('Anna','Javascript'),
+        ('Maria','Java'),
+        ('Maria','C++'),
+        ('James','Scala'),
+        ('Anna','PHP'),
+        ('Anna','HTML')
+        ]
+
+
+        df = spark.createDataFrame(data, ['name', 'lang'])
+
+        (df.groupBy('name').agg(collect_list('lang').alias('languages'), 
+                                collect_set('lang').alias('unique_languages')
+                            ).show(truncate=False)
+        )
+
+        +-----+-----------------------------+-----------------------+
+        |name |languages                    |unique_languages       |
+        +-----+-----------------------------+-----------------------+
+        |James|[Java, Python, Python, Scala]|[Scala, Java, Python]  |
+        |Anna |[PHP, Javascript, PHP, HTML] |[PHP, Javascript, HTML]|
+        |Maria|[Java, C++]                  |[Java, C++]            |
+        +-----+-----------------------------+-----------------------+
+
+
+
 
 
 # spark configurations: 
@@ -147,7 +234,7 @@
     10. serialization: data is often serialized in spark, meaning data is converted into a format that is effecient for data transmition. Data is converted into a byte-stream, thats easier for data transmition. this doesnt involve compression and its often a sep step we need to take. This happens during 
         1. shuffle operations, where data is moved between read and write exchange buffers
         2. UDFs/communication between driver and executor, inferring schemas etc.,
-     11. Sometimes, serialized data is size is more.
+     11. Sometimes, serialized data's size is more.
 
 
 # Spark APIs
@@ -216,6 +303,7 @@
         -> the col with corrupt record becomes null and corrupted record is moved to the new col bad_record
         -> if "abc" is in id col. the df with this setting shows null in id and moves "abc" to bad_record col.
         -> this col can be used to filter the records and move them to locations accordingly.
+        -> if the columnNameOfCorruptRecord is not specified, default column nameis _corrupt_Record, but this also needs to be given in the schema as string type
 
 ### common datatypes
     IntegerType(), StringType(), DateType(), TimestampType(), ArrayType(), MapType(), StructType(), StructField()
@@ -247,6 +335,10 @@
                     .option('path', path)
                     .load()
 
+## read csv 
+- when a csv file is read without schema, a job is created to read metadata of the file (1 rec)
+- when a csv file is read with inferschema option, spark creates 2 jobs, one for reading header, and another for reading few records for inferring schema
+
 
 # dataframe writer 
 
@@ -267,7 +359,7 @@
         - bucketBy(n, col1, col2):
           - only avaiable in spark managed tables as spark also needs to store info on how the table is bucketed, and its only possible w metastore -> df.write.saveAsTable('table')
           - sortBy(col1, col2)
-            - sortBy works for bucketBy: df.write.bucketBy(5, country, state).sortBy(countr, state).saveAsTable('cusstomer')
+            - sortBy works for bucketBy: df.write.bucketBy(5, country, state).sortBy(countr, state).saveAsTable('customer')
     
 # spark tables: 
   * Both managed and unmanaged tables are permananent. Temp tables are created only if createOrReplaceTempView or create temp table syntaxes are used.
@@ -292,7 +384,7 @@
         df.write.mode('append').saveAsTable('cust_tbl', format='parquet')
 
 ## Unmanaged Tables: 
-* These are used when user already has a table, but would like to use SQL like queries on it. cataloging enables that feature.
+* These are used when user already has a files, but would like to use SQL like queries on it. cataloging enables that feature.
 * Unmanaged tables are when user specifies the location to write the files to in both the SQL and saveAsTable case.
   
         spark.sql("""
@@ -382,6 +474,22 @@
       - df.select("id", to_date("travel_dt", 'MM/dd/yyyy').alias("travel_dt"))
     - refer dataframe, columns, built-in functions in the docs
 
+
+        from pyspark.sql import Row
+        #Creating the pysql row
+        row = Row(field1=12345, field2=0.0123, field3=u'Last Field')
+
+        #Convert to python dict
+        temp = row.asDict()
+
+        #Do whatever you want to the dict. Like adding a new field or etc.
+        temp["field4"] = "it worked!"
+
+        # Save or output the row to a pyspark rdd
+        output = Row(**temp)
+
+
+
 ## UDF 
 * steps for UDF function: (The UDF will not be registered in the catalog)
   1. create a UDF function
@@ -400,6 +508,9 @@
             return index_col + 1
         add_one_udf = udf(add_one, IntegerType())
         df.withColumn('new_index', add_one_udf("index"))`
+
+        spark.udf.register("plus_one_udf", plus_one, LongType())
+        spark.sql("select id, plus_one_udf(id) as id2 from tb").show()
 
     ** withColumn doesn't take column strings, hence needs to be resolved using expr
 
@@ -421,6 +532,17 @@
     df.groupBy('country', 'city').count().orderBy('count', expr('country desc') ).show()
     df.groupBy('country', 'city').count().sort(expr('country desc')).show()
 
+
+## translate 
+    replaces the given substr in the col with replace string
+
+    from pyspark.sql.functions import translate 
+    df.withColumn('s', translate(lit('ada d'), 'ad', '1')).show()
+        ==> '11 '
+    df.withColumn('s', translate(lit('abcd'), 'ad', '1')).show()
+        ==> '1bc'
+
+
 ----
 *use all these in withColumn*
 # monotonially increasing id 
@@ -434,7 +556,9 @@
             .orderBy("col1", expr("col2 desc"))
 
 # fillna, dropna 
-*todo*            
+- df.dropna(how='any/all', thresh=, susbset=[])
+- df.fillna(value, subset=[])
+- df.fillna({'name':'unknown', 'salary': 0})  
 
 
 # WINDOW functions 
@@ -455,8 +579,18 @@
     (dfagg.withColumn('running_total', 
                             sum('total').over(running_total_window)).show())
 
+    # sum, row_number etc are pyspark.sql.functions
+
+    # win_spec = Window.orderBy(desc('sal')) -- define the desc order using desc method
+
 
 # JOIN 
+    - left 
+    - right 
+    - full
+    - left_anti
+    - right_anti
+    - inner
 
     customer - left df 
     product - right df 
@@ -520,7 +654,10 @@ if one of the tables is small enough to fit into an executor.
 
         from pyspark.sql.functions import broadcast
         df1.join(broadcast(df2), join_expr, 'inner')
+        df1.join(df2.hint('broadcast'), join_expr, 'inner')
 when we broadcast, shuffle doesnt happen. The data from the broadcasted dataset is directly read into all the executors that needs it I guess.
+- only works for equi joins (df.a == df1.b, not the > or lt ops in join cond)
+- doesnt work for full outer join 
 
 ## bucket join 
 - use hivemetastore: .enableHiveSupport()
@@ -589,7 +726,7 @@ Ex query:
 - AQE respects autoBroadcastJoinThreshold.
 #### switch to shuffle hash join 
 If both the tables turn out to be small after spark calculates the statistics in shuffle stage, SPARK switches to hash join instead of sort-merge. hash join meaning, one side of the tables key is hashed and it probes the other side for the same hash.
-
+- for ShuffleHashJoin and BroadcaseHashJoin, the hash table should fit into the memory, otherwise it causes OOM exceptions.
 
 ### dynamically handle join skew
 - after partitioning two tables involved in the join, if one of the partition on one side of table is skewed, spark breaks it up and the corresponding partition from the other table is duplicated across the tasks that has the breaked up partitions from table1.
@@ -615,7 +752,7 @@ If both the tables turn out to be small after spark calculates the statistics in
 - the DPP can help, if date_dim is broadcasted. looking at this broadcasted date_dim in the broadcast exchange, a filter cond is injected into the read query of the order_df, and the unnecessary partitions are pruned. Now, for all the executors that has the parts of order_df, the date_dim is broadcasted and the join happens
 - the DPP is enabled by default, but for it to work, below conditions has to be met 
     - fact and dim like tables, meaning, one table small enough to be broadcasted
-    - the partitions of fact table and the filter on dim table should make sense, like in this case
+    - the partitions of fact table and the filter on dim table should make sense, like the example above
 
 
 # cache and persist
@@ -672,6 +809,7 @@ If both the tables turn out to be small after spark calculates the statistics in
 - shuffle_merge *todo*
 - shuffle_hash
 - shuffle_replicate_NL
+
 
 
 # broadcasting a variable
@@ -772,3 +910,676 @@ ex: a col contains non-int values that needs to be replaced with nulls. Along wi
 
 # memory allocation and management 
 *todo*
+
+
+# projection pruning while reading from a parquet file 
+
+
+    df = spark.read.format('csv').option('header', 'true').option('inferSchema', 'true').option('path', "C:\\Users\sowja\OneDrive\Desktop\work\DE_notes\project_youtube_analytics\IN_youtube_trending_data.csv").load()
+
+
+
+# interview questions 
+
+## probem1: 
+
+        movieId,title,genres
+        1,Toy Story (1995), Adventure|Animation|Children|Comedy
+        1,Toy Story (1995),Adventure|Drama
+        2,Toy Story 2 (2020),Adventure|Fantasy
+        3,Jumanji 2 (2001),Adventure|Children|Fantasy
+        4,Grumpier Old Men (1995),Comedy|Romance
+        5,Waiting to Exhale (1995),Comedy|Drama|Romance
+        6,Father of the Bride (1995) Part II,Comedy
+        7,Heat (1995),Fantasy
+        
+        OUTPUT: ( Make sure that duplicates are removed)
+        Movie_key, movieId,title,year, genres
+        1,1, Toy Story , 1995, Adventure
+        2, 1, Toy Story , 1995, Animation
+        3, 1, Toy Story , 1995, Children
+        4, 1, Toy Story , 1995, Comedy
+        5, 1,Toy Story , 1995,Drama
+        6, 2, Toy Story 2, 2020, Adventure
+        7, 2, Toy Story 2, 2020, Fantasy
+        8, 3, Jumanji 2, 2001, Adventure
+        9, 3, Jumanji 2, 2001, Children
+        10, 3, Jumanji 2, 2001, Fantasy
+
+---
+
+## solution1: 
+        from pyspark.sql  import Window
+        from pyspark.sql.functions import row_number, regexp_extract, explode
+
+        # create DF 
+        movie_df = spark.read.format('csv').option('header', 'True').load('C:\\Users\sowja\OneDrive\Desktop\work\DE_notes\data_files\movie_genre_csv.csv')
+        movie_df.show()
+
+        # transformation
+        window_spec = Window.orderBy('movieId')
+        (
+                movie_df
+                .withColumn('title_new', regexp_extract('title', r'([a-zA-Z 0-9]+) \((\d+)\)', 1))
+                .withColumn('year', regexp_extract('title', r'([a-zA-Z 0-9]+) \((\d+)\)', 2))
+                .drop('title')
+                .withColumn('genres', explode(split('genres', '\|')) )  # escapinging the pipe as the split reads it as "or" opeartor of regex
+                .dropDuplicates()
+                .withColumn('Movie_key', row_number().over(window_spec))
+            .show(truncate=False)
+        )
+
+
+
+
+# deltatables 
+- deltatable is a framework that allows ACID transactions on files
+- with this, we can perform insert, update and delete ops on a file, which means this allows for type2 on a file without ever loading to a db
+- lakehouse architecture allows for reading data from sources, creating facts and dims including type2 ops and then expose the data for analytics.
+- simply, a warehouse with files in the background.
+- azure synapse analytics is one such service that provides these capabilities to build a lakehouse on object storage.
+- it has storage integrations to connect to the sources, pyspark/sql and delta lake tables to process the data and then provides endpoints for analytics
+- databricks follows madallion arch (bronze, silver, gold layers.)
+
+# merge in spark 
+- spark has merge syntax, w the help of delta tables, this is possible
+- General logic using merge: 
+  * source: has an new rec(insert), update and a ignore record
+  * insert: will be processed when PK doesnt exist in the target
+  * ignore: will be processed when PK matches, but there is no change in dims(hash of tables is also same as the latest record - active_flag=Y)
+  * update: 
+    1. the current active rec needs to updated with a stop date and a new rec needs to be inserted with active_flag=Y
+    2. source=new data, target=warehouse
+    3. wherever there is an update, we need a rec to update the target ts and a rec to insert into source 
+    
+        # create a source_temp 
+        source.join(target.where(active_flag=Y, src.pk=tgt.pk and src.hk!=tgt.hk, 'left'), src.pk=tgt.pk and src.hk!=tgt.hk).select(tgt.pk as pk, src.*)
+        UNION 
+        source.join(target.where(active_flag=Y), src.pk=tgt.pk and src.hk!=tgt.hk, 'inner').select(null as pk, src.*)
+
+        - now the source_temp has 3 rows(for the update row where same PK but diff HK), and only one record for the new records, and one row for ignore rec
+        - merge on matching pks (between tgt and the source_temp)
+        - when matched(1 update row with pk not null) and hks are not equal then update the target end ts to current-timestamp. pk with same hash would be ignored
+        - when not matched (1 update rec w null pk, and a new rec), insert into tgt 
+   
+        merge into TargetProducts t
+        using 
+            (
+                select src.productid as pk, src.* from SourceProducts src
+                union 
+                select null as pk, src.* 
+                from SourceProducts src 
+                join TargetProducts tgt 
+                on src.productid = tgt.productid 
+            )s 
+        on s.pk = t.productid and s.price != t.price and t.end_date = '9999-12-31'  (we can also just put pk in the on cond and include the otehr criteria in when clauses)
+        when matched 
+        then update set end_date = current_date
+        when not matched 
+        then insert values(s.productid, s.productname, s.price, current_date, '9999-12-31')
+
+
+        merge into TargetProducts t
+        using 
+            (
+                select src.productid as pk, src.* from SourceProducts src
+                union 
+                select null as pk, src.* 
+                from SourceProducts src 
+                join TargetProducts tgt 
+                on src.productid = tgt.productid 
+            )s 
+        on s.pk = t.productid 
+        when matched and s.price != t.price and t.end_date = '9999-12-31'  
+        then update set end_date = current_date
+        when not matched 
+        then insert values(s.productid, s.productname, s.price, current_date, '9999-12-31')
+
+        # some dbs provide delete option as well 
+        merge into myTable as target
+        using @tmpTable as source
+            on  ( source.GroundID   = target.GroundID )
+            and ( source.GroupID    = target.GroupID )
+        when
+            not matched by target  # PK not present in tgt
+            then
+                insert ( GroundID, GroupID, AcceptingReservations )
+                values
+                (
+                    source.GroundID,
+                    source.GroupID,
+                    source.AcceptingReservations
+                )
+        -- If there is a row that matches, update values;
+        when matched
+            then
+                update set
+                    target.AcceptingReservations = source.AcceptingReservations
+        -- If they do not match, delete for that GroundID only;
+        when
+            not matched by source  # PK not present on the source side
+            and target.GroundID = @GroundID
+                then
+                    delete;
+
+
+
+# salting technique examples
+
+# hash agg over sort aggergates
+
+# how to handle slow running spark job 
+- partition skew (enable AQE, spark3 has it enabled by default)
+- considerably more number number of partitions than executor cores - increase the number of executors, provide more resources
+- considerably less number of partitions than available executor cores - adjust the partitions accordingly if possible 
+- optimize join stratgies (broadcast > shuffle hash > shuffle sort merge join) 
+- hash agg over sort aggergates **what is this**
+- consider caching in right places 
+- consider using right file formats like parquet, to prune over cols 
+- lookout for disk spills - provide right memory 
+
+# mapreduce
+- heavy disk IOs as map phase writes to disk and reduce phase reads from disk, and the API was complex, and was only available in Java
+
+# spark session
+- sparksession provides all the contexts needed like hive context, spark context etc. No need for creating each context individually
+
+# lazy evaluation 
+- because spark is lazy, it can push predicates to the top and more intensive shuffles down. This is possible because spark waits until an action and come up with an optimized plan
+- in terms of reading a partitioned parquet file, spark can pushdown the predicate and select only cols needed, instead of reading the entire file right when its read, because it waits for an action
+- gives scope for skipping operations that are not needed
+- lineage is how an RDD is created from another RDD when a transformation is called, DAG is created by spark with series of transformations to be performed
+
+
+# pivot and stack 
+*todo*
+
+# coming up with cluster config 
+- start with the size of data that needs to be processed and then the size of each partition
+- By default, we can go with 128MB block size
+- Ex: to process 25GB of data, where each partiton is of 128MB 
+- Num partitions= 
+        25*1024 = 25600MB/128MB = 200 partitions 
+- Each partiton is processed by a core, Hence number of cores = 200
+- Num of executors
+        - ideally between 2 to 5 cores for each exec, we can go with 4 
+        - 200/4 = 50 executors
+- Executor memory 
+        - Memory for each core is usually 4x*partiton size = 512MB
+        - Each executor has 4cores*mem for each core = 4*512MB = 2GB
+- Total Memory 
+        - 50 executors*2GB = 100GB 
+- so, to process 25GB of data, we need a cluster size of 100GB, with 50 executors, 4 cores each 
+- driver memory: 
+  - If there are no collect operations on driver (ideally we wont do it in prod), we can have driver memory=executor mem = 2GB or twice executor mem 
+  - In prod, we mostly write results back to s3 or something, which doesnt involve data collected at driver 
+
+
+
+# deoitte Notes
+Locality level:
+-  PROCESS LOCAL - the task  is being executed on the same exececutor
+-  NODE LOCAL - the task is being exececuted on same node but on diff exececutor
+-  RACK LOCAL - the task is being exececuted on an executor in diff node 
+Lower locality level lesser the latency 
+
+- Ex:
+For an app. a driver started on node x and executor on node y (only one executor)
+>> df.count(): 
+- count is taken across all partitions (since one executor all partitions will be on it) - PROCESS LOCAL 
+	- the counts are written to an exchange from all partitions 
+	- all the counts are read from exchange and aggregated - NODE LOCAL 
+	
+	
+>> df.collect()
+	- all records are collected to driver and in client mode, driver is mostly on a node diff than executor 
+		making this a RACK_LOCAL or atleast NODE_LOCAL process if the executor is on same node as driver.
+		
+
+TASKS Division:
+-> Num. of partitions = no. of tasks = each task to a core 
+-> if there are more no. of tasks than cores, first few tasks gets executed, results get collected and same goes on
+
+Coalesce Vs repartition:
+-> Coalesce forces change in spark.sql.shuffle.partitions making forcing transformations before it to run in that many tasks mentioned by coalesce.
+-> Due to less num of partitions, (if there are transformations before coalesce), the full parallel processing isn't reached and hence could slow down process. If we are using coalesce just to repartition after all Tx are performed, it is faster.
+-> The same also could cause OOM, as it forces creating less no. of tasks there by creating less no. of partitions and hence each partition would be big.
+	Ex: Processing a file of 30M recs which is cached in memory. On top of it there are very few trasnformations before writing it to s3, and used coalesce(8) here. 
+	- Instead of 19200 tasks which it has created without using coalesce, it forced to create only 8 tasks ,making each task process huge data.
+	- since each task/partition is sent to a core, a core wouldn't have that much mem, and then spark engine makes use of DISK space.
+	- but due to big size, the disk space ran out as well.
+	- without coalesce, it created 19200 tasks, having 50 cores, all these tasks acheieve a parallelism factor of 50 and data fit in-memory with liittle spill to the disk as mem associated to all 50 cores were used, as opposed to only using mem associated with 8 cores adn then spilling to disk.
+-> This does reduce data shuffle, by only shuffling data from additional partitions, which also causes uneven partition sizes
+
+-> Repartition does a full shuffle to get required num  of parts, and preserves spark.sql.shuffle.partitions and does a shuffle after that.
+
+
+Memory assignment behaviour & task processing behaviour:
+>> s3 file is being read and taken count 
+- spark reads the file and creates x num of tasks if there are x partitions and each task takes count for each file and write to an exchange buffer, next stage reads from exchange and agg. the final count.
+>> If a file is cached, it it fits in memory, it stores else spills to disk cahce storage level, for df's default is mem+disk 
+>> If its only in-memory level, we get an OOM on executor if mem of asscoiated executors assigned for an application runs out.
+>> If disk is also full, then spark terminates the exececutor.
+
+
+Start of an application:
+>> launches an AM  and in the same node 
+>> launches a driver container 
+>> driver (spark session) talks to cluster manager to see where it can launch executor container 
+>> launches executor containers and driver sends all the artifacts (jars, py files) to executors 
+>> driver creates a lineage graph for each action and divides that in stages by shuffle operations, which is further divided into tasks based on no. of data partitions 
+>> each task is assigned to an executor and core takes up and completes it 
+
+
+Check partitions:
+df.rdd.getNumPartitions()
+
+
+DISTINCT():
+- lets say we have 5 partitions
+- DISTINT first does hasaggregate(dedup) within each parition (reduces the data to be shuffled)
+- shuffles the data so that duplicate values go into same hash exchange 
+- then does the (dedup) hash aggregation on the shuffled data as well
+
+
+df_prev.distinct('NK') join df_curr.distinct('NK') on NK:
+- df_prev is shuffled to get DISTINCT values (above logic)
+- df_curr is shuffled to get DISTINCt values 
+- these two are again shuffled so that join data is collocated 
+
+Remove 2 shuffles and make it 1:
+- since join and distinct is on same CDE, use repartition('NK') shuffle #1
+- now distinct happens without any shuffle, and (if we remove broadcast hint), join would also happen without any shuffle
+(but for this to happen, we can't directly join, but need to join by mentioning just the columns like in case2)
+Expl - case1:
+df_prev.join(df_curr, (df_prev.NK=df_curr.NK), left)
+case2:
+df_prev.join(df_curr, NK, left)
+This changes from 2 shuffles to 1 shuffle for each df in the join
+
+Using Hive tables instead of Spectrum speeds up queries as there would be multiple files and hence that many partitions in HIve table, but for reading from DataFramereader.jdbc we need a column that has define min and max values based on which we cause option("numPartitions", x), "lowerBound", "upperbound", predicate etc.
+
+
+
+
+Imagine 2 datasources - a local parquet file vs a remote table on a database. Spark will read the file itself as compared to Spark will depend on the database to read data. The plan for reading a local parquet file doesn't have asterisk vs the one reading from remote database does.
+
+AQE:
+Coalescing post-shuffle partitions and removing extra tasks on empty paritions:
+
+spark.sql.adaptive.enabled true
+spark.sql.adaptive.coalescePartitions.enabled true 
+spark.sql.adaptive.coalescePartitions.parallelismFirst false
+spark.sql.adaptive.advisoryPartitionSizeInBytes 64MB
+
+spark_submit="spark-submit --master yarn --deploy-mode client --num-executors 12 --executor-cores 5 --executor-memory 18g --driver-memory 18g --conf spark.sql.broadcastTimeout=2000  --conf spark.sql.autoBroadcastJoinThreshold=50M --conf spark.yarn.maxAppAttempt=1 --conf spark.executor.memoryOverhead=2g --conf spark.dynamicAllocation.enabled=true --conf spark.dynamicAllocation.shuffleTracking.enabled=true --conf spark.dynamicAllocation.minExecutors=4 "
+
+
+/usr/lib/spark/bin/spark-submit --deploy-mode cluster --master yarn --name LTCG_staff_effective_history_curated_append --jars s3://ta-individual-datalake-tst-codedeployment/onedatalake/pyspark/jars/postgresql-42.2.18.jar --driver-memory 18g --driver-cores 5 --conf spark.dynamicAllocation.enabled=true --conf spark.dynamicAllocation.shuffleTracking.enabled=true --conf spark.dynamicAllocation.minExecutors=50 --conf spark.yarn.submit.waitAppCompletion=true --conf spark.yarn.maxAppAttempt=1 --conf spark.executor.memoryOverhead=2g
+
+
+
+---------------------------------------------------------------------
+Nodes - 2 or 4
+64Vcores 
+256GB memory 
+
+cores - 5 per executor
+total cores - (64-4) leaving one core per executor to run Hadoop Deamon process, Secondary name node, Task tracker, Job tracker, node manager etc
+num-executors - (60/5) - 12 - leaving 1 executor out for ApplicationManager to run 
+executor-memory - (256/12) >> (21.3) >> leaving max(384mb, 7% of exec mem) to executor-memoryOverhead (1.5g) >> (21.3 - 1.5) >>  19.8g 
+
+12 5 19g
+
+
+#spark_submit="spark-submit --master yarn --deploy-mode client --num-executors 12 --executor-cores 5 --executor-memory 19g --driver-memory 8g --conf "spark.sql.broadcastTimeout=2000" --conf "spark.yarn.maxAppAttempt=1" "
+
+Prod config:
+4 nodes - each with 32VCPU 128 GB
+vcores - 128
+memory - 512GB 
+
+total cores - 124 
+num-executors - 23
+memory - 18g
+
+
+
+
+NEW calculation: 
+master - 1
+core - either 1 or 2
+task - either 2 or 3
+
+core capacity - 
+128 GiB of Memory, 32 vCPUs
+
+task capacity - 
+256 GiB of Memory, 64 vCPUs
+
+--num-executors 25 --executor-cores 10 --executor-memory 20g --driver-memory 18g
+
+
+total cores - 96
+total memory - 384
+
+Lowest node count with same capacity: (3 task nodes)
+for 3 nodes: each node can be assumed as -
+32 cores and 
+128GiB memory 
+
+
+lets say 5 cores per executor  and leaving 1 core per node, we get 93 cores
+--num-executors -> (93 cores / 5 cores per executor) - 18 executors and leaving one executor for app. manager -> 17 executors
+--executor-cores -> 5
+--executor-memory -> (384gb/18 executors) -> 21Gb per executor (-2 gb overhead) => 18gb per executor 
+ideal method: (based on no. of nodes) ->  
+--memory-overhead -> (7% of 21gb) -> 2GB
+
+17 executors , with 18gb each and 5 cores each 
+
+3 nodes 
+48 cores 
+192GB
+
+5 cores -> 9 exececutors -> 26gb per executor (-3gb overhead) -> 23gb
+
+2 units = 16Vcore and 64GB
+8 units 
+64vcores 
+256GB
+
+5 cores -> 12 executors -> 18g 
+
+
+
+
+
+--METHOD IN BLOGS:
+leave 1 core per node, we get 31 cores per node 
+total cores = 31* 3 -> 93
+
+no. of executors = 93/5(ideal cores for good HDFS throughput) = 18.6 -> 18
+Leaving 1 executor for ApplicationManager => --num-executors = 17
+
+
+no. of executors per node = 31/5 = 6.2 -> 6 executors
+memory per executor = 128/6 = 21GB 
+Counting off heap overhead = 7% of 21GB = 2GB. So, actual --executor-memory = 21 - 2 = 18GB
+
+This also results in 17 executors with 18Gb each and 5 cores each with 2Gb of overhead memory for each exec.
+
+--CONSIDERING 5 nodes:
+for 5 nodes: each node can be assumed as -
+19 cores and 
+76 GiB memory 
+
+leaving 1 core per node - we get 18 cores per node 
+total cores = 18*5 = 90
+
+no. of executors = 90/5 = 18 executors 
+Leaving 1 executor for AM = 17 executors 
+
+no. of executors per node = 18/5 = 3.6 
+mem. per executor = 76/3.6 = 21 GB
+Counting off heap overhead = 7% of 21GB = 2GB. So, actual --executor-memory = 21 - 2 = 18GB
+
+This also results in 17 executors with 18Gb each and 5 cores each with 2Gb of overhead memory
+
+
+
+
+FOR 16GiB and 4VCPUS for a task and core node cluster:
+nodes: 2
+memory: 32Gb
+cores: 8
+
+cores - leaving a core per node, 3 cores per node - 6 cores in total 
+executors - 
+
+
+sh /application/financedw/financedwgdq/scripts/run_gdqscript.sh -s ltcghybrid -t claimspayment -b 11606 -c 2022-03-11 -j TA-INDIVIDUAL-FINDW-FINANCEDW-LTCGHYBRID-GDQ  -e tst  -p financedw
+
+spark_submit="spark-submit --master yarn --deploy-mode client --conf "spark.dynamicAllocation.enabled=true" "
+
+
+Dynamic allocation enabled in spark app submit and emr property spark.emr.maximizeResourceAllocation was set to true:
+
+properties in spark  (/etc/spark/conf/spark-defaults.conf)
+spark.executor.instances         2
+spark.executor.cores             4
+spark.driver.memory              10647M
+spark.executor.memory            9833M
+spark.default.parallelism        16
+spark.emr.maximizeResourceAllocation true
+spark.emr.default.executor.memory 9833M
+spark.emr.default.executor.cores 4
+spark.emr.default.executor.instances 2
+spark.dynamicAllocation.enabled true 
+
+even the spark history server had the same properties
+spark.dynamicAllocation.enabled	true
+spark.emr.default.executor.cores	4
+spark.emr.default.executor.instances	2
+spark.emr.default.executor.memory	9833M
+spark.emr.maximizeResourceAllocation	true
+
+- creating EMR without MaximizeresourceAllocation, and will run with dynamicAllocation = true in spark-submit
+
+spark.dynamicAllocation.enabled	true
+spark.emr.default.executor.cores	4
+spark.emr.default.executor.memory	9486M
+
+----------------------------------------------------------------------------------------------------------
+OLD calculations:
+
+Points:
+only task and core nodes are considered in the resource manager.
+master node specs is entirely out of equation for planning the capacity of your apps.
+
+
+http://10-128-83-203:8088/
+(try changing these specs, works fine, check redshift connections and also retry logic)
+
+in EMR: Memory - 584GB, Vcores - 160
+
+num of nodes: (1-64G-16V, 4(2-128G-32V, 2-64G-16V), 6(4-128G-32V, 2-64G-16V)) --> 10
+num of cores: 16 + (64 + 32) + (32 + 128) --> 272
+
+(96 Vcores, 360G, 3nodes) --this was avaialble on resource manager (12 nodes were decommissioned)
+each node had - 32Vcore, 128G (these were core and task nodes, excluding master node), and the given specs worked just fine.
+
+10  nodes
+27 cores per node (270 cores in total)
+64G per node (640G)
+
+tiny executore (one exececutor per core):
+--num-executors 272
+--num-cores 1
+--executor-memory 4G
+
+fat exececutor (one executor per node):
+--num-executors 10
+--num-cores 27
+--executor-memory 64G
+
+balanced:
+--num-executors 25
+--num-cores 10
+--executor-memory 20g
+
+
+8 nodes
+48 cores per node 
+185G per node (1480G)
+
+calcs:
+-> leaving one core per node for deamon process (48-1) -> 47 cores per node
+in total -> 47*8(nodes) -> 376 cores available in overall cluster
+
+-> lets consider 10 cores per executor -> no. of executors = 376(total cores)/10(cores per exececutor) => 37
+-> Leaving 1 executor for ApplicationManager => --num-executors = 30
+
+-> memory for each exececutor => 1400G/30 -> 40g
+
+
+--num-executors 25
+--num-cores 10
+--executor-memory 25g
+
+8 nodes
+48 cores per node 
+185G per node ()
+
+
+--driver-memory 18g 
+--driver-cores 5 
+--executor-cores 5 
+--executor-memory 18g 
+--conf spark.default.parallelism=110
+
+
+
+
+16 nodes - 16 vCore, 64 GiB memory
+20 nodes -> 32 vcores, 256 GiB memory
+
+36 nodes  
+24 cores per node 
+170 G per node 
+
+--num-executors 50
+--num-cores 15
+--executo-memory 80g
+
+
+96 Vcores, 360G, 3nodes
+
+
+spark_submit="spark-submit --master yarn --deploy-mode client --num-executors 25 --executor-cores 10 --executor-memory 20g --driver-memory 18g --conf "spark-sql-broadcastTimeout=2000" --conf "spark-yarn-maxAppAttempt=1" --conf "spark-executor-memoryOverhead=2g" --driver-class-path /usr/share/aws/redshift/jdbc/redshift-jdbc41-1-2-37-1061-jar --jars /usr/share/aws/redshift/jdbc/redshift-jdbc41-1-2-37-1061-jar,/apps/oracle/ojdbc6-jar,/apps/postgres/postgresql-42-2-23-jar"
+
+spark-submit --master yarn --deploy-mode client --num-executors 50 --executor-cores 15 --executor-memory 80g --driver-memory 30g --conf "spark-sql-broadcastTimeout=2000" --conf "spark-yarn-maxAppAttempt=1" --conf "spark-executor-memoryOverhead=2g" --driver-class-path /usr/share/aws/redshift/jdbc/redshift-jdbc41-1-2-37-1061-jar --jars /usr/share/aws/redshift/jdbc/redshift-jdbc41-1-2-37-1061-jar,/apps/oracle/ojdbc6-jar,/apps/postgres/postgresql-42-2-23-jar gdq_dynamic-py -s ltcg -t party -b 101 -c 2021-08-31
+
+
+
+
+ --driver-memory 18g --driver-cores 5 --executor-cores 5 --executor-memory 18g --conf spark-default-parallelism=110 --conf spark-yarn-submit-waitAppCompletion=true --conf spark-yarn-maxAppAttempt=1 --conf spark-executor-memoryOverhead=2g
+ 
+ 
+ 
+import boto3
+client = boto3-client('emr') 
+response = client-cancel_steps(
+    ClusterId='j-21DJVIXDQ2X39',
+    StepIds=a
+)
+ 
+response = client-list_steps(
+    ClusterId='j-21DJVIXDQ2X39',
+    StepStates=[
+        'PENDING', 'RUNNING',
+    ]
+)
+
+http://10-128-80-162:9870/
+application_1632916944306_0037 --> pool?
+
+
+HDFS Name Node	http://10-128-80-162:9870/
+Tez UI	http://10-128-80-162:8080/tez-ui
+Spark History Server	http://10-128-80-162:18080/
+Ganglia	http://10-128-80-162/ganglia/
+Hue	http://10-128-80-162:8888/
+Resource Manager	http://10-128-80-162:8088/
+
+
+------------------------------------------
+cost estimations
+------------------------------------------
+	198858837
+	5889746
+
+
+198M recs - 5M recs
+2.1G - 147.9 MB
+
+storage costs for one source system (7 domains)- 
+per month - 
+60G - 4500MB (4.5G)
+1.38 USD - 0.11 USD
+per year - 
+16.56 USD vs 1.32USD
+	
+storage costs for 10 source system (7 domains)- 
+per year - 
+160 USD vs 10 USD
+
+
+EMR cost (an hour daily)
+master - 1- m5.4xlarge
+core - 4- m5.8xlarge
+task - 6- m5.8xlarge
+36.32 USD per month
+
+Ec2:
+master 1 - 30 USD (m5.4xlarge)
+core - 1 - 60  USD (m5.8xlarge)
+task - 3 - 90 USD (m5.4xlarge)
+180 USD per month
+
+Total EMR monthly cost - 200 USD
+
+max config 
+master 1 -  30 USD (m5.4xlarge)
+core - 4 - 240 USD (m5.8xlarge)
+task - 6 - 360 USD (m5.8xlarge)
+630 USD per month 
+
+Total EMR monthly cost - 660 USD (on full capacity)
+
+avg would be - 430USD per month/per ss
+
+general:
+4x - 1 - 30.21 
+8x - 1- 60
+
+master - 1- m5.4xlarge
+core - 4- m5.4xlarge
+task - 6- m5.4xlarge
+64.24 USD per month 
+
+
+on avg EMR cost could be - 
+per month - 76.105 USD
+per year - 913.26 USD 
+per 10 sources per year - 9130 USD
+
+
+
+cost of 60GB per month of KVP - 
+s3 cost -> 1.38 USD 
+Tiered price for: 60 GB
+60 GB x 0.0230000000 USD = 1.38 USD
+Total tier cost = 1.3800 USD (S3 Standard storage cost)
+210 GET requests in a month x 0.0000004 USD per request = 0.0001 USD (S3 Standard GET requests cost)
+1.38 USD + 0.0001 USD = 1.38 USD (Total S3 Standard Storage, data requests, S3 select cost)
+S3 Standard cost (monthly): 1.38 USD
+
+spectrum -> 0.29 USD per month (60 GB)
+
+cost of 5GB per month of KVP - 
+
+
+
+s3 storage costs
+emr cost
+spectrum
+ra3 std cost
+ra3 storage cost
+
+cost for opt1 v opt2
+
+opt3
+directly copy data into findw from IDL (49 tables), along RDM with RDM tables
+
+

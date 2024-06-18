@@ -42,6 +42,10 @@ ex2: include one more col in the group by - country
 
   Whatever window function is run, it's on top of the grouped result. so, imagine if there is no window function and just group by, the result will be showing total_payment for each country, user combination. On this result set, rank is applied. First window doesn't have any partitions, and the second one is partitioned by country.
 
+
+  lag window function: lag(col, step_size, default_value). default_value could be a query as well that returns one row.
+
+
 # OFFSET 
 skips the result of select "column" by n, where n is specified by offset and, the "column" is determined by the order by clause. Offset is used in combination with ORDER BY. OFFSET is run after select and order by 
 
@@ -169,6 +173,8 @@ Use - operator. Returns the result in days when two dates are subtaracted. But t
     current_timestamp::date - (current_timestamp - INTERVAL '1 year')::date; ==> 366 
 
 
+
+
 ### diff between timestamp columns
     SELECT 
       current_timestamp - (current_timestamp - INTERVAL '1 month'), 
@@ -182,7 +188,7 @@ Use - operator. Returns the result in days when two dates are subtaracted. But t
       "7 days"
 --- 
 
-      SELECT 
+    SELECT 
         current_timestamp - (current_timestamp - INTERVAL '1 hour'), 
         current_timestamp - (current_timestamp - INTERVAL '1 minute'), 
         current_timestamp - (current_timestamp - INTERVAL '1 second')
@@ -190,6 +196,10 @@ Use - operator. Returns the result in days when two dates are subtaracted. But t
       "01:00:00"	
       "00:01:00"
       "00:00:01"
+
+    SELECT 
+    current_timestamp - (current_timestamp - INTERVAL '1 day 1 hour'); 
+    "1 day 01:00:00"
 
 ### difference between a date and a timestamp 
 Works, but returns the result as combination of "x days HH:mm:ss"
@@ -201,6 +211,20 @@ Works, but returns the result as combination of "x days HH:mm:ss"
     SELECT 
       (current_timestamp - INTERVAL '1 day') - current_timestamp, 
       (current_timestamp - INTERVAL '1 day')::date - current_timestamp::date
+      "-1 day"
+
+      select 
+          current_date - to_date('2024-05-10', 'yyyy-MM-dd')
+        
+
+### extracting date parts from interval 
+when timestamp is involved in the diff between two date fields(one of it is ts or both of them are ts cols), we can cast it to interval and extract required date part from it. This doesn't apply for diff between two dates as the diff is output as days (int)
+
+
+  SELECT extract( day/hour/minute/second from (current_timestamp - to_date('2024-05-10', 'yyyy-MM-dd'))::interval)
+
+  only these can extracted - day/hour/minute/second
+  as the result comes in days HH:MI:SS, and other date parts like year/month etc cant be derived
 
 
 ## date formatting 
@@ -248,7 +272,8 @@ Works, but returns the result as combination of "x days HH:mm:ss"
 
 # MISC 
 - multiply one of the ints with 1.0 to get float value in the output if both the inputs are ints
-- any operation with null results in null. Like null+0, null/0 etc. this doesn't apply for agg operations. avg, sum, count doesnt include null. 
+- any operation with null results in null. Like null+0, null/0 etc. 
+- this doesn't apply for agg operations. avg, sum, count doesnt include null. 
 
         salary 
         100 
@@ -260,4 +285,87 @@ Works, but returns the result as combination of "x days HH:mm:ss"
 
 
 # REGEX
+
+    regexp_match(str, pattern)
+    - returns the matching parts sep by comma in the output if more than one match pattern is asked for using "()"
+
+the pattern can be provided with groups "()", and the output shows all the matching groups
+
+    p = '(^[a-zA-Z]{1}[a-zA-Z0-9_.-]*)(@gmail.com$)'
+    str = sow-janya@gmail.com
+    output: sow-janya, @gmail.com
+
+    p = '(^[a-zA-Z]{1}[a-zA-Z0-9_.-]*@gmail.com$)'
+    str = sow-janya@gmail.com
+    output: sow-janya@gmail.com
+
+    p = '(^[a-zA-Z]{1}[a-zA-Z0-9_.-]*)@gmail.com$'
+    str = sow-janya@gmail.com
+    output: sow-janya
+
+- similar to res = re.match(pattern, string) in python, the res matching groups can be extracted using res.groups()[1]
+
+## patterns 
+
+        [] - grouping, with no specified order 
+        ^ - startswith 
+        $ - endswith
+        () - grouping in specified order 
+        ? = 0 or 1
+        * 0 or more 
+        + 1 or more 
+        \w - [a-zA-Z_]
+        \d - digits
+        \s - space
+        (?:) - non-CAPTURING groups
+            - as shown in the above example, if something has to grouped w () to identify the pattern, but we dont wanna capture that in the output, when we take group(1), we can inlude this.
+
+# INITCAP, UPPER, LOWER
+    - str functions
+
+
+# LISTAGG, PIVOT  (RS)
 *todo*
+
+
+# null safety operator 
+<=>, doesnt return null when comparing values with nulls. is equivaent to comparing two values using coalesce
+
+
+# LISTAGG in Redshift/pivot 
+
+
+# percentage_increase 
+(old-new/old)*100
+
+
+# anti-join 
+- get records from one table with no matches in another table
+- customers who have not purchased anything on the website in August
+- can be implemented using left join and a where clause where table2.id is null, considering id is the join key
+- can also be implemented using the not exists, not in 
+
+
+# subquery vs correlated subquery 
+- subquery is executed once, where as correlated subquery is executed once per each row in the outer query 
+
+  -- students with max marks 
+  select student_id, student_name, marks 
+  from student_marks 
+  where marks = (select max(marks) from marks table)
+
+  -- students with max marks for each subject 
+  select student_id, student_name, marks 
+  from student_marks sm
+  where marks = (
+    select max(marks) from marks m table where 
+    sm.subject_id = m.subject_id
+    )
+
+- we can use joins over subqueries, but it depends on the engines
+- a subquery might be used as a join may result in dups when it joins with more than one rec from the second table, and we need to be careful about avoiding this (might need to use distinct ), whereas sunquery ensures unique rows from table1
+
+
+# join vs subquery 
+- usually, its said that join is more efficient than subquery, but it depends on the use case
+- if the results we are expecting from a subquery are less, then using subquery is preferred, and if not using join is a good idea as join can make use of the indexes
